@@ -1,52 +1,111 @@
+# 文件名: app.py
 import streamlit as st
+import pandas as pd
 from projects import PROJECTS
 from ai_explainer import explain_project
+from data_tracker import log_interaction, load_data
 
-st.set_page_config(page_title="AI Portfolio", layout="wide")
+# 设置页面配置（必须是第一行 Streamlit 命令）
+st.set_page_config(page_title="Lucas's Portfolio", layout="wide")
 
-st.title("🚀 Interactive AI Project Portfolio")
+st.title("🚀 Lucas Liu - Data Science Portfolio")
+st.markdown("Welcome! This is an AI-powered portfolio. Ask questions about my projects!")
 
-# ---- Sidebar: Project Selection ----
-st.sidebar.header("Projects")
+# 创建两个标签页
+tab1, tab2 = st.tabs(["📂 Project Showcase", "📊 Analytics Dashboard"])
 
-project_name = st.sidebar.selectbox(
-    "Choose a project",
-    list(PROJECTS.keys())
-)
+# ==========================================
+# TAB 1: 项目展示
+# ==========================================
+with tab1:
+    # 侧边栏：选择项目
+    st.sidebar.header("Select a Project")
+    project_name = st.sidebar.selectbox("Choose a project to explore:", list(PROJECTS.keys()))
+    
+    # 获取项目数据
+    project = PROJECTS[project_name]
 
-project = PROJECTS[project_name]
+    # 主区域：显示项目详情
+    st.header(f"Project: {project_name}")
+    st.write(project["description"])
+    
+    # 展示技能
+    st.markdown("**Skills:**")
+    st.write(" · ".join([f"`{skill}`" for skill in project["skills"]]))
 
-# ---- Main Content ----
-st.header(project_name)
-st.write(project["description"])
+    st.divider()
+    
+    # 左右分栏：左边是 Demo，右边是 AI 问答
+    col1, col2 = st.columns([1, 1])
+    
+    # --- 左边: Interactive Demo ---
+    with col1:
+        st.subheader("💡 Interactive Demo")
+        
+        if project["demo_type"] == "slider":
+            st.write("Adjust the slider to see how the model predicts churn:")
+            tenure = st.slider("User Tenure (months)", 0, 60, 12)
+            # 简单的模拟逻辑
+            prob = max(0, 1 - (tenure / 60)) 
+            st.info(f"Predicted Churn Probability: **{prob:.2%}**")
+            
+        elif project["demo_type"] == "text":
+            text_input = st.text_area("Paste a job description or resume snippet:")
+            if text_input:
+                st.success("Match Score: **85%** (Simulated Output)")
+            else:
+                st.caption("Waiting for input...")
 
-st.subheader("Skills Demonstrated")
-st.write(", ".join(project["skills"]))
+    # --- 右边: AI Q&A ---
+    with col2:
+        st.subheader("🤖 Ask Gemini about this")
+        st.markdown(f"Ask anything about **{project_name}** (e.g., 'Why use this model?')")
+        
+        user_question = st.text_input("Your Question:")
+        
+        if st.button("Ask AI"):
+            if user_question.strip():
+                with st.spinner("Gemini is thinking..."):
+                    # 1. 调用 AI 回答
+                    answer = explain_project(user_question, project["ai_context"])
+                    st.write(answer)
+                    
+                    # 2. 记录数据到后台
+                    log_interaction(project_name, user_question)
+            else:
+                st.warning("Please enter a question first.")
 
-# ---- Demo Placeholder ----
-st.subheader("Live Demo")
+# ==========================================
+# TAB 2: 数据看板 (给面试官的亮点)
+# ==========================================
+with tab2:
+    st.header("📊 Visitor Analytics")
+    st.markdown("This dashboard tracks user engagement data in real-time.")
+    
+    # 加载数据
+    df = load_data()
+    
+    if not df.empty:
+        # 显示关键指标
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Interactions", len(df))
+        m2.metric("Most Popular Project", df['Project'].mode()[0] if not df['Project'].empty else "N/A")
+        m3.metric("Latest Query", df['Timestamp'].iloc[-1].split(" ")[1])
+        
+        st.divider()
 
-if project["demo_type"] == "slider":
-    value = st.slider("User tenure (months)", 0, 60, 12)
-    st.write(f"Churn probability (demo): {round(value / 60, 2)}")
-
-elif project["demo_type"] == "text":
-    text = st.text_area("Paste text here")
-    if text:
-        st.write("Match score (demo): 72%")
-
-st.divider()
-st.subheader("💬 Ask AI about this project")
-
-question = st.text_input("Ask a question (e.g. Why this model?)")
-
-if st.button("Ask AI"):
-    if question.strip() == "":
-        st.warning("Please enter a question.")
+        # 图表区域
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.subheader("🔥 Project Interest")
+            # 统计每个项目被问的次数
+            project_counts = df['Project'].value_counts()
+            st.bar_chart(project_counts)
+            
+        with c2:
+            st.subheader("📝 Recent Questions Log")
+            st.dataframe(df[['Project', 'Question']].tail(5), hide_index=True)
+            
     else:
-        with st.spinner("Thinking..."):
-            answer = explain_project(
-                question,
-                project["ai_context"]
-            )
-        st.write(answer)
+        st.info("No data yet. Go to the 'Project Showcase' tab and ask some questions to generate data!")
