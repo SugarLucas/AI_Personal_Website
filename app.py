@@ -90,7 +90,15 @@ with tab2:
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Interactions", len(df))
         m2.metric("Most Popular Project", df['Project'].mode()[0] if not df['Project'].empty else "N/A")
-        m3.metric("Latest Query", df['Timestamp'].iloc[-1].split(" ")[1])
+        
+        # 🔴 修复点在这里：使用 strftime 格式化时间对象
+        try:
+            latest_time = df['Timestamp'].iloc[-1].strftime("%H:%M:%S")
+        except AttributeError:
+            #以此防守：万一它有时候还是字符串（比如空数据时），做个兼容
+            latest_time = str(df['Timestamp'].iloc[-1]).split(" ")[-1]
+            
+        m3.metric("Latest Query", latest_time)
         
         st.divider()
 
