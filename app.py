@@ -1,119 +1,120 @@
-# 文件名: app.py
 import streamlit as st
 import pandas as pd
-from projects import PROJECTS
+from projects import PROJECTS as DEFAULT_PROJECTS 
 from ai_explainer import explain_project
-from data_tracker import log_interaction, load_data
+from data_tracker import log_interaction, load_data, add_project_to_db, fetch_all_projects
+from pdf_processor import extract_text_from_pdf, analyze_project_with_ai
 
-# 设置页面配置（必须是第一行 Streamlit 命令）
 st.set_page_config(page_title="Lucas's Portfolio", layout="wide")
 
-st.title("🚀 Lucas Liu - Data Science Portfolio")
-st.markdown("Welcome! This is an AI-powered portfolio. Ask questions about my projects!")
+# --- 数据加载逻辑 ---
+db_projects = fetch_all_projects()
+ALL_PROJECTS = {**DEFAULT_PROJECTS, **db_projects}
 
-# 创建两个标签页
-tab1, tab2 = st.tabs(["📂 Project Showcase", "📊 Analytics Dashboard"])
+st.title("🚀 Lucas Liu - Data Science Portfolio")
+
+tab1, tab2, tab3 = st.tabs(["📂 Project Showcase", "📊 Analytics Dashboard", "➕ Add Project (Admin)"])
 
 # ==========================================
-# TAB 1: 项目展示
+# TAB 1: Project Showcase
 # ==========================================
 with tab1:
-    # 侧边栏：选择项目
-    st.sidebar.header("Select a Project")
-    project_name = st.sidebar.selectbox("Choose a project to explore:", list(PROJECTS.keys()))
-    
-    # 获取项目数据
-    project = PROJECTS[project_name]
+    st.sidebar.header("Select Project")
+    project_name = st.sidebar.selectbox("Choose a project:", list(ALL_PROJECTS.keys()))
+    project = ALL_PROJECTS[project_name]
 
-    # 主区域：显示项目详情
     st.header(f"Project: {project_name}")
     st.write(project["description"])
     
-    # 展示技能
-    st.markdown("**Skills:**")
-    st.write(" · ".join([f"`{skill}`" for skill in project["skills"]]))
-
+    skills_display = project["skills"]
+    if isinstance(skills_display, list):
+        skills_display = " · ".join(skills_display)
+    st.markdown(f"**Skills:** `{skills_display}`")
     st.divider()
     
-    # 左右分栏：左边是 Demo，右边是 AI 问答
     col1, col2 = st.columns([1, 1])
-    
-    # --- 左边: Interactive Demo ---
     with col1:
-        st.subheader("💡 Interactive Demo")
-        
-        if project["demo_type"] == "slider":
-            st.write("Adjust the slider to see how the model predicts churn:")
-            tenure = st.slider("User Tenure (months)", 0, 60, 12)
-            # 简单的模拟逻辑
-            prob = max(0, 1 - (tenure / 60)) 
-            st.info(f"Predicted Churn Probability: **{prob:.2%}**")
-            
-        elif project["demo_type"] == "text":
-            text_input = st.text_area("Paste a job description or resume snippet:")
-            if text_input:
-                st.success("Match Score: **85%** (Simulated Output)")
-            else:
-                st.caption("Waiting for input...")
+        st.subheader("💡 Demo / Artifacts")
+        d_type = project.get("demo_type", "text")
+        if d_type == "slider":
+            val = st.slider("Input Value", 0, 100, 50)
+            st.info(f"Prediction: {val * 1.5}")
+        else:
+            st.info("This project contains text/code analysis.")
+            st.code("print('Hello World') # Placeholder code")
 
-    # --- 右边: AI Q&A ---
     with col2:
-        st.subheader("🤖 Ask Gemini about this")
-        st.markdown(f"Ask anything about **{project_name}** (e.g., 'Why use this model?')")
-        
-        user_question = st.text_input("Your Question:")
-        
-        if st.button("Ask AI"):
-            if user_question.strip():
-                with st.spinner("Gemini is thinking..."):
-                    # 1. 调用 AI 回答
-                    answer = explain_project(user_question, project["ai_context"])
-                    st.write(answer)
-                    
-                    # 2. 记录数据到后台
+        st.subheader("🤖 Ask AI about this")
+        user_question = st.text_input("Question:", key="q1")
+        if st.button("Ask Gemini"):
+            if user_question:
+                with st.spinner("Thinking..."):
+                    ans = explain_project(user_question, project["ai_context"])
+                    st.write(ans)
                     log_interaction(project_name, user_question)
-            else:
-                st.warning("Please enter a question first.")
 
 # ==========================================
-# TAB 2: 数据看板 (给面试官的亮点)
+# TAB 2: Analytics Dashboard
 # ==========================================
 with tab2:
     st.header("📊 Visitor Analytics")
-    st.markdown("This dashboard tracks user engagement data in real-time.")
-    
-    # 加载数据
     df = load_data()
-    
     if not df.empty:
-        # 显示关键指标
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Total Interactions", len(df))
-        m2.metric("Most Popular Project", df['Project'].mode()[0] if not df['Project'].empty else "N/A")
-        
-        # 🔴 修复点在这里：使用 strftime 格式化时间对象
+        st.dataframe(df.tail(5))
         try:
-            latest_time = df['Timestamp'].iloc[-1].strftime("%H:%M:%S")
-        except AttributeError:
-            #以此防守：万一它有时候还是字符串（比如空数据时），做个兼容
-            latest_time = str(df['Timestamp'].iloc[-1]).split(" ")[-1]
-            
-        m3.metric("Latest Query", latest_time)
-        
-        st.divider()
-
-        # 图表区域
-        c1, c2 = st.columns(2)
-        
-        with c1:
-            st.subheader("🔥 Project Interest")
-            # 统计每个项目被问的次数
-            project_counts = df['Project'].value_counts()
-            st.bar_chart(project_counts)
-            
-        with c2:
-            st.subheader("📝 Recent Questions Log")
-            st.dataframe(df[['Project', 'Question']].tail(5), hide_index=True)
-            
+            st.bar_chart(df['Project'].value_counts())
+        except KeyError:
+            st.warning("Not enough data to map columns yet.")
     else:
-        st.info("No data yet. Go to the 'Project Showcase' tab and ask some questions to generate data!")
+        st.info("No data yet.")
+
+# ==========================================
+# TAB 3: 管理员上传区域 (🔴 修复了这里的逻辑)
+# ==========================================
+with tab3:
+    st.header("⚡ AI Project Extractor")
+    uploaded_file = st.file_uploader("Upload Project PDF", type=["pdf"])
+    
+    # 🔴 1. 初始化 Session State (内存)
+    if "ai_data" not in st.session_state:
+        st.session_state["ai_data"] = None
+
+    # 🔴 2. 点击分析按钮：只负责提取数据并存入内存
+    if uploaded_file is not None:
+        if st.button("Analyze & Extract"):
+            with st.spinner("Reading PDF and asking Gemini..."):
+                raw_text = extract_text_from_pdf(uploaded_file)
+                extracted_data = analyze_project_with_ai(raw_text)
+                
+                if extracted_data:
+                    # 把数据存进“永久内存”，这样刷新页面也不会丢
+                    st.session_state["ai_data"] = extracted_data
+                    st.success("Extraction Successful! Please review below.")
+                else:
+                    st.error("AI extraction failed.")
+
+    # 🔴 3. 只要内存里有数据，就一直显示表单
+    if st.session_state["ai_data"]:
+        data = st.session_state["ai_data"]
+        
+        with st.form("edit_project"):
+            st.subheader("Review Extracted Data")
+            # 使用内存里的数据填充默认值
+            new_title = st.text_input("Title", data['title'])
+            new_desc = st.text_area("Description", data['description'])
+            new_skills = st.text_input("Skills", data['skills'])
+            new_context = st.text_area("AI Context", data['ai_context'], height=150)
+            
+            submitted = st.form_submit_button("Save to Database")
+            
+            if submitted:
+                # 4. 保存到数据库
+                success = add_project_to_db(new_title, new_desc, new_skills, "text", new_context)
+                if success:
+                    st.success(f"✅ Project '{new_title}' saved successfully!")
+                    # 可选：清空内存，重置状态
+                    st.session_state["ai_data"] = None
+                    # 强制刷新页面，让新项目立刻出现在 Tab 1
+                    st.rerun() 
+                else:
+                    st.error("Failed to save to database. Check terminal for SQL errors.")
